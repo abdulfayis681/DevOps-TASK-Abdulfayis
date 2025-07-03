@@ -61,7 +61,7 @@ jobs:
       - name: Build and Push Docker Image
         run: |
           IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/${{ steps.setenv.outputs.ecr_repo }}:${{ steps.setenv.outputs.tag }}"
-          docker build -t $IMAGE .
+          docker build -t $IMAGE ./Swiggy-Application-code/Dockerfile
           docker push $IMAGE
 
 
@@ -104,8 +104,8 @@ jobs:
 
       - name: Helm Upgrade or Install
         run: |
-          helm upgrade --install ${{ env.RELEASE_NAME }} ./swiggy-app \
-            -f ./swiggy-app/${{ needs.build.outputs.values_file }} \
+          helm upgrade --install ${{ env.RELEASE_NAME }} ./swiggy-app-helm-chart \
+            -f ./swiggy-app-helm-chart/${{ needs.build.outputs.values_file }} \
             --set image.repository="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/${{ needs.build.outputs.ecr_repo }}" \
             --set image.tag=${{ needs.build.outputs.image_tag }} \
             --namespace ${{ needs.build.outputs.namespace }} \
