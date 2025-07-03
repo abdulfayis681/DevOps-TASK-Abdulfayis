@@ -61,7 +61,7 @@ jobs:
       - name: Build and Push Docker Image
         run: |
           IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/${{ steps.setenv.outputs.ecr_repo }}:${{ steps.setenv.outputs.tag }}"
-          docker build -t $IMAGE ./Swiggy-Application-code/Dockerfile
+          docker build -t $IMAGE ./Swiggy-Application-code
           docker push $IMAGE
 
 
