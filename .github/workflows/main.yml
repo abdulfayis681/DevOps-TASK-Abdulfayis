@@ -1,0 +1,112 @@
+name: Application CI/CD
+
+on:
+  push:
+    branches:
+      - staging
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: DevOps
+  RELEASE_NAME: swiggy
+
+jobs:
+
+
+  # Job 1: Setup & Build Docker Image
+
+  build:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.setenv.outputs.tag }}
+      ecr_repo: ${{ steps.setenv.outputs.ecr_repo }}
+      namespace: ${{ steps.setenv.outputs.namespace }}
+      values_file: ${{ steps.setenv.outputs.values_file }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name:  Set Environment Variables
+        id: setenv
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "namespace=production" >> $GITHUB_OUTPUT
+            echo "values_file=values.production.yaml" >> $GITHUB_OUTPUT
+            echo "ecr_repo=swiggy-prod" >> $GITHUB_OUTPUT
+            echo "tag=prod-${{ github.sha }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/staging" ]]; then
+            echo "namespace=staging" >> $GITHUB_OUTPUT
+            echo "values_file=values.staging.yaml" >> $GITHUB_OUTPUT
+            echo "ecr_repo=swiggy-staging" >> $GITHUB_OUTPUT
+            echo "tag=staging-${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS --password-stdin \
+          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
+
+      - name: Build and Push Docker Image
+        run: |
+          IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/${{ steps.setenv.outputs.ecr_repo }}:${{ steps.setenv.outputs.tag }}"
+          docker build -t $IMAGE .
+          docker push $IMAGE
+
+
+  #  Job 2: Deploy via Helm
+
+  deploy:
+    name:  Deploy to Kubernetes with Helm
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name:  Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.27.1'
+
+      - name:  Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.13.3
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+
+      - name: Create Namespace if Not Exists
+        run: |
+          kubectl get namespace ${{ needs.build.outputs.namespace }} || \
+          kubectl create namespace ${{ needs.build.outputs.namespace }}
+
+      - name: Helm Upgrade or Install
+        run: |
+          helm upgrade --install ${{ env.RELEASE_NAME }} ./swiggy-app \
+            -f ./swiggy-app/${{ needs.build.outputs.values_file }} \
+            --set image.repository="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/${{ needs.build.outputs.ecr_repo }}" \
+            --set image.tag=${{ needs.build.outputs.image_tag }} \
+            --namespace ${{ needs.build.outputs.namespace }} \
+            --create-namespace
