@@ -56,6 +56,7 @@ To streamline and automate deployment into Kubernetes clusters through CI/CD wor
 ---
 
 ## 5. Architecture Diagram
+![Architecture Diagram](./DevOps-Task.png)
 
 ```
 Developer --> GitHub (Push to staging/main)
